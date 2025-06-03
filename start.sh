@@ -15,10 +15,82 @@ VERT="\033[1;32m"
 BOLD="\033[1m"
 
 USER_ID_FILE="user_id.json"
-CODES_CSV_URL="https://raw.githubusercontent.com/tonrepo/tonprojet/main/codes.csv" # À MODIFIER éventuel
-
+API_URL="https://your-fly-app.fly.dev/check-key"  # <-- Mets ici ton endpoint, le nom est neutre
 VERSION_FILE="version.txt"
-VERSION=$(cat "$VERSION_FILE" 2>/dev/null || echo "Inconnue")
+VERSION=$(cat "$VERSION_FILE" 2>/dev/null || echo "1.0.0")
+
+center_text() {
+    local text="$1"
+    local largeur=48
+    local len=${#text}
+    local padding=$(( (largeur - len) / 2 ))
+    printf "%*s%s%*s" "$padding" "" "$text" "$((largeur - len - padding))" ""
+}
+
+# Vérifie la validité user_id+clé via API (ne dit rien sur la technologie ou le serveur)
+is_subscription_valid() {
+    local uid="$1"
+    local key="$2"
+    local response status
+
+    response=$(curl -s --connect-timeout 6 "$API_URL?user_id=$uid&key=$key")
+    if [[ -z "$response" ]] || ! echo "$response" | grep -q '"status"'; then
+        echo ""
+        return 2
+    fi
+
+    status=$(echo "$response" | grep -oE '"status"\s*:\s*"[a-zA-Z0-9_-]+"' | sed -E 's/.*"status"\s*:\s*"([^"]+)".*/\1/')
+    if [[ "$status" == "valid" ]]; then
+        return 0
+    elif [[ "$status" == "expired" ]] || [[ "$status" == "invalid" ]]; then
+        return 1
+    else
+        echo ""
+        return 2
+    fi
+}
+
+# Demande l'user id ET la clé, vérifie via l'API, enregistre dans le JSON
+ask_and_save_user_id() {
+    clear
+    echo -e "${CYAN}=== Enregistrement de votre ID utilisateur et clé d'abonnement ===${RESET}"
+    while true; do
+        read -rp "Entrez votre ID (fourni par le bot Telegram) : " uid
+        read -rp "Collez votre clé d'abonnement : " key
+        [[ -z "$uid" || -z "$key" ]] && { echo -e "${ROUGE}Champs requis non remplis.${RESET}"; continue; }
+        is_subscription_valid "$uid" "$key"
+        api_status=$?
+        if [[ "$api_status" == "0" ]]; then
+            echo "{\"user_id\":\"$uid\",\"key\":\"$key\"}" > "$USER_ID_FILE"
+            echo -e "${VERT}✅ ID et clé enregistrés et vérifiés !${RESET}"
+            sleep 1
+            break
+        elif [[ "$api_status" == "2" ]]; then
+            echo -e "${ROUGE}Erreur réseau ou serveur injoignable. Essayez plus tard.${RESET}"
+            sleep 2
+        else
+            echo -e "${ROUGE}❌ ID ou clé invalide/expiré. Vérifiez votre abonnement sur le bot Telegram.${RESET}"
+            sleep 1
+        fi
+    done
+}
+
+# Lit user_id et clé du JSON ou demande
+get_or_ask_user_data() {
+    local uid="" key=""
+    if [[ -f "$USER_ID_FILE" ]]; then
+        uid=$(grep -oE '"user_id"\s*:\s*"([a-zA-Z0-9_-]+)"' "$USER_ID_FILE" | sed -E 's/.*"user_id"\s*:\s*"([^"]+)".*/\1/')
+        key=$(grep -oE '"key"\s*:\s*"([a-zA-Z0-9_-]+)"' "$USER_ID_FILE" | sed -E 's/.*"key"\s*:\s*"([^"]+)".*/\1/')
+    fi
+    is_subscription_valid "$uid" "$key"
+    api_status=$?
+    if [[ -z "$uid" || -z "$key" || "$api_status" == "1" || "$api_status" == "2" ]]; then
+        ask_and_save_user_id
+        uid=$(grep -oE '"user_id"\s*:\s*"([a-zA-Z0-9_-]+)"' "$USER_ID_FILE" | sed -E 's/.*"user_id"\s*:\s*"([^"]+)".*/\1/')
+        key=$(grep -oE '"key"\s*:\s*"([a-zA-Z0-9_-]+)"' "$USER_ID_FILE" | sed -E 's/.*"key"\s*:\s*"([^"]+)".*/\1/')
+    fi
+    echo "$uid;$key"
+}
 
 affichage_logo() {
     local logo=(
@@ -107,58 +179,6 @@ ligne_inferieure() {
     echo -e "${MAGENTA}╚$(printf '═%.0s' $(seq 1 53))╝${RESET}"
 }
 
-is_connected() {
-    curl -s --connect-timeout 3 https://www.google.com > /dev/null
-    return $?
-}
-
-get_user_id() {
-    if [[ -f "$USER_ID_FILE" ]]; then
-        cat "$USER_ID_FILE" | grep -oE "[a-zA-Z0-9_-]+" | head -1
-    else
-        echo ""
-    fi
-}
-
-save_user_id() {
-    echo "{\"user_id\":\"$1\"}" > "$USER_ID_FILE"
-}
-
-ask_user_id() {
-    clear
-    echo -e "${CYAN}=== Enregistrement de votre ID utilisateur ===${RESET}"
-    while true; do
-        read -rp "Entrez votre ID (fourni par le bot Telegram) : " uid
-        [[ -z "$uid" ]] && { echo -e "${ROUGE}ID non valide.${RESET}"; continue; }
-        if curl -s --connect-timeout 6 "$CODES_CSV_URL" | grep -q "^$uid,"; then
-            save_user_id "$uid"
-            echo -e "${VERT}✅ ID enregistré !${RESET}"
-            sleep 1
-            break
-        else
-            echo -e "${ROUGE}❌ ID introuvable. Faites d'abord l'inscription sur le bot Telegram.${RESET}"
-            sleep 1
-        fi
-    done
-}
-
-check_code_valid() {
-    local uid="$1"
-    local csv
-    csv=$(curl -s --connect-timeout 6 "$CODES_CSV_URL")
-    [[ -z "$csv" ]] && return 1
-    local now
-    now=$(date +%s)
-    while IFS=, read -r user_id code payment_method payment_number active timestamp _; do
-        [[ "$user_id" == "$uid" && "$active" == "validated" ]] || continue
-        [[ "$timestamp" =~ ^[0-9]+$ ]] || continue
-        if (( now - timestamp < 2592000 )); then
-            return 0
-        fi
-    done <<< "$csv"
-    return 1
-}
-
 progress_bar() {
     local step=5
     local duree=2.0
@@ -178,19 +198,13 @@ progress_bar() {
 maj_auto() {
     local version=$(cat "$VERSION_FILE" 2>/dev/null || echo "Inconnue")
     local largeur=48
-    local center_text() {
-        local text="$1"
-        local len=${#text}
-        local padding=$(( (largeur - len) / 2 ))
-        printf "%*s%s%*s" "$padding" "" "$text" "$((largeur - len - padding))" ""
-    }
 
     local ligne1="┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓"
     local ligne2="┃$(center_text "MAJ Automatique   [$(date +'TS %H:%M:%S')]")┃"
     local ligne3="┃$(center_text "Version $version")┃"
     local ligne4="┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛"
     local largeur_term=$(tput cols)
-    local centrer_et_afficher() {
+    centrer_et_afficher() {
         local ligne="$1"
         local couleur="$2"
         local longeur_pure=48
@@ -235,14 +249,23 @@ menu_abonnement() {
             clear
             echo -e "${CYAN}=== Ajouter votre clé d'abonnement (ID utilisateur) ===${RESET}"
             read -rp "Collez votre clé d'abonnement (ID) achetée : " key
-            if [[ -z "$key" ]]; then
-                echo -e "${ROUGE}Clé vide. Annulation.${RESET}"
+            read -rp "Entrez votre ID utilisateur : " uid
+            if [[ -z "$key" || -z "$uid" ]]; then
+                echo -e "${ROUGE}Champs requis non remplis. Annulation.${RESET}"
                 sleep 1
                 return
             fi
-            save_user_id "$key"
-            echo -e "${VERT}✅ Clé sauvegardée dans $USER_ID_FILE${RESET}"
-            echo -e "${CYAN}Votre abonnement sera surveillé automatiquement.${RESET}"
+            is_subscription_valid "$uid" "$key"
+            api_status=$?
+            if [[ "$api_status" == "0" ]]; then
+                echo "{\"user_id\":\"$uid\",\"key\":\"$key\"}" > "$USER_ID_FILE"
+                echo -e "${VERT}✅ Clé sauvegardée et active.${RESET}"
+                echo -e "${CYAN}Votre abonnement sera surveillé automatiquement.${RESET}"
+            elif [[ "$api_status" == "2" ]]; then
+                echo -e "${ROUGE}Erreur réseau ou serveur injoignable.${RESET}"
+            else
+                echo -e "${ROUGE}Clé invalide ou expirée.${RESET}"
+            fi
             sleep 2
             ;;
         2)
@@ -261,6 +284,8 @@ menu_abonnement() {
 }
 
 menu_principal() {
+    local menu_lock=0
+    local lock_message=""
     while true; do
         clear
         affichage_logo
@@ -268,13 +293,45 @@ menu_principal() {
         afficher_cadre
         afficher_version
 
-        user_id=$(get_user_id)
-        # Le contrôle d'abonnement se fait ailleurs
+        local user_id="" key=""
+        if [[ -f "$USER_ID_FILE" ]]; then
+            user_id=$(grep -oE '"user_id"\s*:\s*"([a-zA-Z0-9_-]+)"' "$USER_ID_FILE" | sed -E 's/.*"user_id"\s*:\s*"([^"]+)".*/\1/')
+            key=$(grep -oE '"key"\s*:\s*"([a-zA-Z0-9_-]+)"' "$USER_ID_FILE" | sed -E 's/.*"key"\s*:\s*"([^"]+)".*/\1/')
+        fi
+        is_subscription_valid "$user_id" "$key"
+        api_status=$?
+        if [[ "$api_status" == "1" ]]; then
+            menu_lock=2 # Abonnement expiré/invalide
+        elif [[ "$api_status" == "2" ]]; then
+            lock_message="${ROUGE}Erreur réseau ou serveur injoignable. Toutes les fonctions sont verrouillées.${RESET}"
+            menu_lock=1 # Hors ligne
+        else
+            menu_lock=0
+            lock_message=""
+        fi
 
         afficher_options
         ligne_inferieure
+
+        if [[ $menu_lock -eq 1 ]]; then
+            echo -e "$lock_message"
+            echo -ne "${JAUNE}Appuyez sur Entrée pour réessayer...${RESET}"
+            read -r
+            continue
+        fi
+
+        if [[ $menu_lock -eq 2 ]]; then
+            echo -e "${ROUGE}Votre abonnement est expiré ou invalide. Seules les options 4, 5 et 7 sont disponibles.${RESET}"
+        fi
+
         echo ""
         read -rp "Votre choix : " choix
+
+        if [[ $menu_lock -eq 2 && ! "$choix" =~ ^(4|5|7|0)$ ]]; then
+            echo -e "${ROUGE}Accès restreint. Veuillez renouveler votre abonnement pour débloquer toutes les fonctionnalités.${RESET}"
+            sleep 2
+            continue
+        fi
 
         case $choix in
             1)
