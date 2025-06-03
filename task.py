@@ -349,7 +349,7 @@ elif feature == "automatisation":
         selected = [accounts[i] for i in sorted(set(idxs))]
         return selected
 
-    def list_images():
+   def list_images():
         images = []
         for ext in ("*.jpg", "*.jpeg", "*.png"):
             images.extend(glob.glob(os.path.join(IMAGES_DIR, ext)))
@@ -498,36 +498,535 @@ elif feature == "automatisation":
 
 elif feature == "task":
     # === TOUT TON SCRIPT task.py ASYNC (déjà collé plus haut, voir message précédent) ===
-    import os
-    import json
-    import re
-    import random
-    import asyncio
-    from telethon import TelegramClient, events, errors
-    from instagrapi import Client
-    from colorama import init, Fore, Style
-    import logging
-    from pathlib import Path
-    import time
-    import datetime
-    import sys
-    from collections import deque
-    # ...
-    # (colle ici tout ton script async du mode task, exactement comme dans ton message précédent)
-    # ...
-    # à la fin :
-    if __name__ == "__main__" or True:
-        while True:
+    # python/termux TS
+import os
+import json
+import re
+import random
+import asyncio
+from telethon import TelegramClient, events, errors
+from instagrapi import Client
+from colorama import init, Fore, Style
+import logging
+from pathlib import Path
+import time
+import datetime
+import sys
+from collections import deque
+
+init(autoreset=True)
+
+def clean_log_daily(logfile):
+    """Efface le log s'il date d'hier ou avant."""
+    if not os.path.exists(logfile):
+        return
+    try:
+        # On récupère la date de la dernière modif du log
+        last_modif = datetime.datetime.fromtimestamp(os.path.getmtime(logfile))
+        now = datetime.datetime.now()
+        # Si le log n'est pas du jour, on l'efface
+        if last_modif.date() < now.date():
+            with open(logfile, 'w') as f:
+                pass  # Vide le fichier
+            print(Fore.YELLOW + "[🧹] Log effacé car trop ancien.")
+    except Exception as e:
+        print(Fore.RED + f"[❌] Impossible de nettoyer le log : {e}")
+
+clean_log_daily("task.log")
+
+logging.basicConfig(
+    filename="task.log",
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+
+PROJECT_DIR = Path(__file__).resolve().parent
+CONFIG_DIR = os.path.join(PROJECT_DIR, "configuration")
+SESSION_DIR = os.path.join(PROJECT_DIR, "ig_sessions")
+IG_ACCOUNTS_FILE = os.path.join(CONFIG_DIR, "ig.json")
+USER_SPACE_DIR = os.path.join(PROJECT_DIR, "utilisateurs")
+SELECTED_USER_FILE = os.path.join(USER_SPACE_DIR, "selected_user.json")
+TELEGRAM_DIR = os.path.join(PROJECT_DIR, "telegram_user")
+TELEGRAM_SESSION_FILE = os.path.join(TELEGRAM_DIR, "tg_session")
+TELEGRAM_API_FILE = os.path.join(TELEGRAM_DIR, "telegram_api.json")
+
+last_username = None
+last_bot_msg_time = None
+pending_comment = None
+send_lock = asyncio.Lock()
+last_messages_sent = deque(maxlen=2)
+last_back_time = None
+insta_task_queue = asyncio.Queue()
+processing_insta_task = False
+
+waiting_for_username = False  # Pour éviter les doublons Instagram/username
+
+# Pour éviter le double "✅Completed"
+last_completed_sent = None
+
+# Ajout pour éviter les doublons username/Instagram quand les messages sont successifs
+last_sent_type = None  # "instagram" ou "username" ou None
+last_sent_time = 0
+MIN_MSG_INTERVAL = 0.03  # secondes anti-doublon
+
+def color(text, code):
+    return f"\033[{code}m{text}\033[0m"
+
+def titre_section(titre):
+    largeur = 50
+    try:
+        terminal_width = os.get_terminal_size().columns
+    except:
+        terminal_width = 80
+    padding = max((terminal_width - largeur) // 2, 0)
+    spaces = ' ' * padding
+    print(f"\n{spaces}{color('╔' + '═' * largeur + '╗', '1;35')}")
+    print(f"{spaces}{color('║ ' + titre.center(largeur - 2) + ' ║', '1;35')}")
+    print(f"{spaces}{color('╚' + '═' * largeur + '╝', '1;35')}\n")
+
+def horloge_ts():
+    now = datetime.datetime.now()
+    return Fore.BLUE + f"[TS {now.strftime('%H:%M:%S')}]" + Style.RESET_ALL
+
+def print_colored(message, color=Fore.CYAN):
+    horloge = horloge_ts()
+    print(f"{horloge} {color}{message}{Style.RESET_ALL}")
+    logging.info(message)
+def load_accounts():
+    with open(IG_ACCOUNTS_FILE, "r") as f:
+        return json.load(f)
+
+def save_selected_user(account):
+    with open(SELECTED_USER_FILE, "w") as f:
+        json.dump(account, f)
+    logging.info(f"Compte sélectionné enregistré: {account.get('username')}")
+
+def ig_session_path(username):
+    return os.path.join(SESSION_DIR, f"{username}.json")
+
+def connect_instagram(username, password):
+    cl = Client()
+    session_path = ig_session_path(username)
+    if os.path.exists(session_path):
+        try:
+            cl.load_settings(session_path)
+            cl.login(username, password)
+            logging.info(f"Session Instagram restaurée pour {username}.")
+        except Exception as e:
+            print_colored(f"[⚠️] Impossible de restaurer la session pour {username}, reconnexion...", Fore.RED)
+            logging.warning(f"Restaurer session échouée pour {username} : {e}")
             try:
-                asyncio.run(main())
-            except KeyboardInterrupt:
-                print(Fore.CYAN + "\n📴 Arrêt manuel détecté. Retour à start.sh dans 3 secondes..." + Style.RESET_ALL)
-                time.sleep(4)
-                os.system("bash start.sh")
-                break
+                cl = Client()
+                cl.login(username, password)
             except Exception as e:
-                print(Fore.YELLOW + f"⚠️ Redémarrage du bot suite à une erreur : {e}" + Style.RESET_ALL)
-                time.sleep(5)
+                print_colored(f"[❌] Erreur Instagram pour {username} : {e}", Fore.RED)
+                logging.error(f"Connexion Instagram échouée pour {username} : {e}")
+                return None
+    else:
+        try:
+            cl.login(username, password)
+        except Exception as e:
+            print_colored(f"[❌] Erreur Instagram pour {username} : {e}", Fore.RED)
+            logging.error(f"Connexion Instagram échouée pour {username} : {e}")
+            return None
+    try:
+        cl.dump_settings(session_path)
+        logging.info(f"Session Instagram sauvegardée pour {username}.")
+    except Exception as e:
+        print_colored(f"[⚠️] Sauvegarde session échouée pour {username} : {e}", Fore.RED)
+        logging.warning(f"Sauvegarde session échouée pour {username}: {e}")
+    return cl
+
+def is_valid_phone(phone):
+    return re.match(r"^\+\d{10,15}$", phone)
+
+def load_json_file(filepath):
+    try:
+        with open(filepath, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, FileNotFoundError):
+        print(Fore.RED + "[❌] Fichier de configuration invalide ou manquant.")
+        return {}
+
+def get_telegram_api():
+    data = load_json_file(TELEGRAM_API_FILE)
+    if all(key in data for key in ["api_id", "api_hash", "phone"]):
+        return data["api_id"], data["api_hash"], data["phone"]
+    try:
+        titre_section("CONNECTION A TELEGRAM")
+        api_id = int(input(Fore.GREEN + "API_ID Telegram : "))
+        api_hash = input(Fore.GREEN + "API_HASH Telegram : ")
+        while True:
+            phone_number = input(Fore.GREEN + "Numéro de téléphone (+...): ")
+            if is_valid_phone(phone_number):
+                break
+            print(Fore.RED + "Format invalide. Exemple : +261341234567")
+        with open(TELEGRAM_API_FILE, "w") as f:
+            json.dump({
+                "api_id": api_id,
+                "api_hash": api_hash,
+                "phone": phone_number
+            }, f)
+        logging.info("Identifiants Telegram sauvegardés.")
+        return api_id, api_hash, phone_number
+    except Exception as e:
+        print(Fore.RED + f"[❌] Erreur lors de la saisie : {e}")
+        sys.exit(1)
+
+async def send_message_with_retry(client, entity, message, max_retries=1, timeout=7):
+    global last_bot_msg_time, last_messages_sent
+    async with send_lock:
+        if message in last_messages_sent:
+            return
+        for attempt in range(max_retries + 1):
+            await asyncio.sleep(0.2)
+            await client.send_message(entity, message)
+            last_messages_sent.append(message)
+            start = time.time()
+            while time.time() - start < timeout:
+                await asyncio.sleep(0.2)
+                if last_bot_msg_time and time.time() - last_bot_msg_time < timeout:
+                    return
+            if attempt < max_retries:
+                return
+async def traiter_message(message_text, client):
+    global last_username, last_bot_msg_time, pending_comment, last_messages_sent, waiting_for_username
+    global last_sent_type, last_sent_time, processing_insta_task, last_completed_sent
+
+    now = time.time()
+    last_messages_sent.clear()
+    last_bot_msg_time = now
+    message_lower = message_text.lower().strip()
+
+    def reset_completed_flag():
+        global last_completed_sent
+        last_completed_sent = None
+
+    # Gestion du commentaire différé
+    if pending_comment is not None:
+        if not re.search(r'https://www\.instagram\.com/[^\s\)]+', message_text) and "action" not in message_lower:
+            comment_text = message_text.strip()
+            link = pending_comment['link']
+            action = "leave the comment"
+            reset_completed_flag()  # Nouvelle tâche = reset flag
+            print_colored(f"[💬] Commentaire reçu: {comment_text}", Fore.LIGHTCYAN_EX)
+            accounts = load_accounts()
+            account = None
+            if last_username:
+                account = next((a for a in accounts if a["username"] == last_username), None)
+            if account is None and accounts:
+                account = random.choice(accounts)
+                last_username = account["username"]
+            if account is None:
+                print_colored("[❌] Aucun compte Instagram valide.", Fore.RED)
+                await send_message_with_retry(client, "SmmKingdomTasksBot", "Instagram")
+                pending_comment = None
+                return
+            save_selected_user(account)
+            cl = connect_instagram(account["username"], account["password"])
+            if not cl:
+                print_colored(f"[❌] Erreur Instagram pour {account['username']} - tâche ignorée.", Fore.RED)
+                await send_message_with_retry(client, "SmmKingdomTasksBot", "Instagram")
+                pending_comment = None
+                return
+            processing_insta_task = True
+            try:
+                media_id = cl.media_pk_from_url(link)
+                cl.media_comment(media_id, comment_text)
+                print_colored(f"[💬] Commentaire posté : {comment_text}", Fore.GREEN)
+                key = f"{link}|{action}|{comment_text}"
+                if last_completed_sent != key:
+                    await send_message_with_retry(client, "SmmKingdomTasksBot", "✅Completed")
+                    print_colored("[✅] Action Instagram réussi.", Fore.GREEN)
+                    last_completed_sent = key
+                key = f"{link}|{action}|{comment_text}"
+                if last_completed_sent != key:
+                    await send_message_with_retry(client, "SmmKingdomTasksBot", "✅Completed")
+                    last_completed_sent = key
+            except Exception as e:
+                print_colored(f"[❌] Erreur lors du commentaire avec {account['username']} : {e} -- tâche ignorée.", Fore.RED)
+            finally:
+                pending_comment = None
+                await asyncio.sleep(0.05)
+                processing_insta_task = False
+            return
+
+    # Quand le bot demande explicitement le username → envoyer UNIQUEMENT le username,
+    # mais ignorer si on vient juste d'envoyer "Instagram" (anti-doublon !)
+    if "please give us your profile's username" in message_lower or \
+       "choose account from the list" in message_lower or \
+       "select user from list" in message_lower:
+        if last_sent_type == "instagram" and (now - last_sent_time) < MIN_MSG_INTERVAL:
+            print_colored("[⚠️] Username ignoré car Instagram vient d'être envoyé.", Fore.YELLOW)
+            return
+        accounts = load_accounts()
+        if not accounts:
+            print_colored("[❌] Aucun compte disponible.", Fore.RED)
+            return
+        selected = random.choice(accounts)
+        last_username = selected["username"]
+        save_selected_user(selected)
+        await asyncio.sleep(0.1)
+        print_colored(f"[🤵] Compte: {last_username}", Fore.YELLOW)
+        await send_message_with_retry(client, "SmmKingdomTasksBot", last_username)
+        waiting_for_username = False
+        last_sent_type = "username"
+        last_sent_time = now
+        return
+
+    # Quand on reçoit "Instagram" SEUL → on attend la demande du username ensuite, ne pas répondre
+    if message_lower == "instagram":
+        waiting_for_username = True
+        return
+
+    link_match = re.search(r'https://www\.instagram\.com/[^\s\)]+', message_text)
+    action_match = re.search(r"action\s*:\s*([^\n\r]+)", message_text, re.IGNORECASE)
+    if link_match and action_match:
+        link = link_match.group(0)
+        action = action_match.group(1).strip().lower()
+        reset_completed_flag()  # Nouvelle tâche = reset flag
+        accounts = load_accounts()
+        account = None
+        if last_username:
+            account = next((a for a in accounts if a["username"] == last_username), None)
+        if account is None and accounts:
+            account = random.choice(accounts)
+            last_username = account["username"]
+        if account is None:
+            print_colored("[❌] Aucun compte Instagram valide.", Fore.RED)
+            await send_message_with_retry(client, "SmmKingdomTasksBot", "Instagram")
+            return
+        save_selected_user(account)
+        cl = connect_instagram(account["username"], account["password"])
+        if not cl:
+            print_colored(f"[❌] Erreur Instagram pour {account['username']} - tâche ignorée.", Fore.RED)
+            await send_message_with_retry(client, "SmmKingdomTasksBot", "Instagram")
+            return
+        processing_insta_task = True
+        try:
+            if "like" in action or "video view" in action or "view video" in action or "leave the comment" in action:
+                media_id = cl.media_pk_from_url(link)
+                id_to_show = media_id
+            elif "follow" in action or "story view" in action or "view story" in action:
+                if "stories" in link:
+                    user_match = re.search(r"instagram\.com/stories/([^/?]+)", link)
+                    if user_match:
+                        user_story = user_match.group(1)
+                        user_id = cl.user_id_from_username(user_story)
+                        id_to_show = user_id
+                        user = user_story
+                    else:
+                        target = re.search(r"instagram\.com/([^/?]+)", link).group(1)
+                        user_id = cl.user_id_from_username(target)
+                        id_to_show = user_id
+                        user = target
+                else:
+                    target = re.search(r"instagram\.com/([^/?]+)", link)
+                    if target:
+                        user = target.group(1)
+                        user_id = cl.user_id_from_username(user)
+                        id_to_show = user_id
+            else:
+                id_to_show = "???"
+            print_colored(f"[🌍] Lien : {link}", Fore.CYAN)
+            print_colored(f"[🆔] Id : {id_to_show}", Fore.CYAN)
+            print_colored(f"[🔧] Action : {action}", Fore.MAGENTA)
+
+            key = f"{link}|{action}"
+            # LIKE
+            if "like" in action:
+                cl.media_like(media_id)
+                print_colored(f"[👍] Post liké par {account['username']}", Fore.GREEN)
+                if last_completed_sent != key:
+                    await send_message_with_retry(client, "SmmKingdomTasksBot", "✅Completed")
+                    last_completed_sent = key
+            # FOLLOW
+            elif "follow" in action:
+                cl.user_follow(user_id)
+                print_colored(f"[❤️] {account['username']} suit {user}", Fore.GREEN)
+                if last_completed_sent != key:
+                    await send_message_with_retry(client, "SmmKingdomTasksBot", "✅Completed")
+                    last_completed_sent = key
+            # VIDEO VIEW
+            elif "video view" in action or "view video" in action:
+                cl.media_seen([media_id])
+                print_colored(f"[🎬] Vidéo vue 3s par {account['username']}", Fore.GREEN)
+                await asyncio.sleep(3)
+                if last_completed_sent != key:
+                    await send_message_with_retry(client, "SmmKingdomTasksBot", "✅Completed")
+                    last_completed_sent = key
+            # STORY VIEW
+            elif "story view" in action or "view story" in action:
+                stories = cl.user_stories(user_id)
+                if stories:
+                    cl.story_view(stories[0].pk)
+                    print_colored(f"[👀] Story vue pour {user}", Fore.GREEN)
+                if last_completed_sent != key:
+                    await send_message_with_retry(client, "SmmKingdomTasksBot", "✅Completed")
+                    last_completed_sent = key
+            # COMMENTAIRE DIFFÉRÉ
+            elif "leave the comment" in action:
+                pending_comment = {"link": link}
+                print_colored("[♻️] Attente du texte à commenter", Fore.LIGHTYELLOW_EX)
+                processing_insta_task = False
+                return
+            else:
+                print_colored(f"[❓] Action non reconnue : {action}", Fore.YELLOW)
+
+            print_colored("[✅] Action Instagram réussi.", Fore.GREEN)
+            logging.info(f"Action {action} faite sur {link} avec {account['username']}")
+        except Exception as e:
+            print_colored(f"[❌] Erreur action avec {account['username']} : {e} -- tâche ignorée.", Fore.RED)
+            await send_message_with_retry(client, "SmmKingdomTasksBot", "Instagram")
+        finally:
+            await asyncio.sleep(0.01)
+            processing_insta_task = False
+        return
+
+    # Après "all condition" ou "no active tasks", on envoie UNIQUEMENT "Instagram"
+    # mais ignorer si on vient juste d'envoyer le username (anti-doublon !)
+    if "no active tasks" in message_lower or "all condition" in message_lower or "choose social network" in message_lower:
+        if last_sent_type == "username" and (now - last_sent_time) < MIN_MSG_INTERVAL:
+            print_colored("[⚠️] Instagram ignoré car username vient d'être envoyé.", Fore.YELLOW)
+            return
+        if not waiting_for_username:
+            await asyncio.sleep(0.01)
+            await send_message_with_retry(client, "SmmKingdomTasksBot", "Instagram")
+            waiting_for_username = True
+            last_sent_type = "instagram"
+            last_sent_time = now
+        return
+
+    if "💸 my balance" in message_lower:
+        match = re.search(r"💸\s*My\s*Balance\s*[:：]?\s*\*?\*?([0-9.,kK]+)\*?\*?", message_text, re.IGNORECASE)
+        montant = match.group(1) if match else "???"
+        print(color("💸 My Balance : ", "1;37") + color(f"{montant}", "1;35") + color(" cashCoins", "1;37"))
+        await asyncio.sleep(0.05)
+        await client.send_message("SmmKingdomTasksBot", "📝Tasks📝")
+        return
+
+def is_idle():
+    if pending_comment is not None:
+        return False
+    if last_bot_msg_time is not None and time.time() - last_bot_msg_time < 10:
+        return False
+    return True
+
+def boucle_automatique(client):
+    global last_back_time
+    last_back_time = time.time()
+
+    @client.on(events.NewMessage(chats="SmmKingdomTasksBot"))
+    async def handler(event):
+        # NOUVEAU LOGIQUE : Si le message du bot contient "thank you for completing the task"
+        # alors on considère que c'est un vrai retour du bot, on met à jour last_bot_msg_time !
+        if "thank you for completing the task" in event.message.message.lower():
+            global last_bot_msg_time
+            last_bot_msg_time = time.time()
+            print_colored("[🤖] Le bot vous remercie grace à vos tâches.", Fore.LIGHTGREEN_EX)
+        await insta_task_queue.put(event.message.message)
+
+    async def boucle():
+        global last_back_time, processing_insta_task, pending_comment
+        while True:
+            await asyncio.sleep(5)
+            now = time.time()
+            # NE relance QUE si aucune tâche n'est en cours et aucun commentaire différé en attente
+            if not processing_insta_task and pending_comment is None:
+                if last_bot_msg_time is not None and now - last_bot_msg_time > 8:
+                    time_before = last_bot_msg_time
+                    print_colored("[⏳] Relance rapide demande tâche Instagram.", Fore.YELLOW)
+                    await asyncio.sleep(0.1)
+                    # Double vérification juste avant d'envoyer
+                    if last_bot_msg_time == time_before and not processing_insta_task and pending_comment is None:
+                        await send_message_with_retry(client, "SmmKingdomTasksBot", "Instagram")
+                    else:
+                        print_colored("[🔛] Le bot déjà du retour", Fore.GREEN)
+            # 🔙Back toutes les 30 minutes SI le script est "idle" (pas occupé)
+            if is_idle() and (last_back_time is None or now - last_back_time > 1800):
+                await send_message_with_retry(client, "SmmKingdomTasksBot", "🔙Back")
+                last_back_time = now
+    client.loop.create_task(boucle())
+
+async def process_insta_tasks(client):
+    global processing_insta_task
+    while True:
+        task_message = await insta_task_queue.get()
+        try:
+            await traiter_message(task_message, client)
+        except Exception as e:
+            print_colored(f"[❌] Erreur dans le traitement de la tâche: {e}", Fore.RED)
+        insta_task_queue.task_done()
+async def connect_telegram():
+    titre_section("LANCEMENT DES TACHES TELEGRAM - INSTAGRAM")
+    print(Fore.YELLOW + "\n[🥰] Raha hiala na hanajanona ny asa ianao dia tsindrio ny CTRL+C ")
+    api_id, api_hash, phone = get_telegram_api()
+    client = TelegramClient(TELEGRAM_SESSION_FILE, api_id, api_hash)
+    try:
+        if os.path.exists(TELEGRAM_SESSION_FILE + ".session"):
+            await client.connect()
+            if not await client.is_user_authorized():
+                await client.send_code_request(phone)
+                code = input(Fore.GREEN + "Code reçu par Telegram : ")
+                await client.sign_in(phone, code)
+            print(Fore.GREEN + "[✅] Session Telegram restaurée.")
+            logging.info("Session Telegram restaurée.")
+        else:
+            await client.start(phone=lambda: phone)
+            print(Fore.GREEN + "[✅] Connexion Telegram réussie !")
+            logging.info("Nouvelle session Telegram connectée.")
+    except errors.PhoneCodeInvalidError:
+        print(Fore.RED + "[❌] Code incorrect. Réessaie.")
+        sys.exit(1)
+    except errors.ApiIdInvalidError:
+        print(Fore.RED + "[❌] API_ID ou API_HASH invalide.")
+        sys.exit(1)
+    except Exception as e:
+        print(Fore.RED + f"[❌] Erreur de connexion : {e}")
+        sys.exit(1)
+    return client
+
+async def main():
+    init_directories()
+    telegram_client = await connect_telegram()
+
+    try:
+        messages = await telegram_client.get_messages("SmmKingdomTasksBot", limit=1)
+        if messages:
+            await insta_task_queue.put(messages[0].message)
+    except Exception as e:
+        print_colored(f"[⚠️] Impossible de traiter le dernier message : {e}", Fore.YELLOW)
+        logging.warning(f"Erreur récupération dernier message : {e}")
+
+    boucle_automatique(telegram_client)
+    telegram_client.loop.create_task(process_insta_tasks(telegram_client))
+    await telegram_client.run_until_disconnected()
+
+def init_directories():
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    os.makedirs(SESSION_DIR, exist_ok=True)
+    os.makedirs(USER_SPACE_DIR, exist_ok=True)
+    os.makedirs(TELEGRAM_DIR, exist_ok=True)
+    if not os.path.exists(IG_ACCOUNTS_FILE):
+        with open(IG_ACCOUNTS_FILE, "w") as f:
+            json.dump([], f)
+    if not os.path.exists(SELECTED_USER_FILE):
+        with open(SELECTED_USER_FILE, "w") as f:
+            json.dump({}, f)
+    logging.info("Répertoires et fichiers de configuration initialisés.")
+
+if __name__ == "__main__":
+    while True:
+        try:
+            asyncio.run(main())
+        except KeyboardInterrupt:
+            print(Fore.CYAN + "\n📴 Arrêt manuel détecté. Retour à start.sh dans 3 secondes..." + Style.RESET_ALL)
+            time.sleep(4)
+            os.system("bash start.sh")
+            break
+        except Exception as e:
+            print(Fore.YELLOW + f"⚠️ Redémarrage du bot suite à une erreur : {e}" + Style.RESET_ALL)
+            time.sleep(5)
 
 else:
     print("❌ Fonction non reconnue.")
