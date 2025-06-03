@@ -3,7 +3,6 @@ chmod +x ./*.sh ./*.py
 clear
 tput civis
 
-# === COULEURS ===
 ROUGE="\033[0;31m"
 JAUNE="\033[0;33m"
 CYAN="\033[0;36m"
@@ -15,16 +14,11 @@ VERT="\033[1;32m"
 BOLD="\033[1m"
 
 USER_ID_FILE="user_id.json"
-CODES_CSV_URL="https://raw.githubusercontent.com/tonrepo/tonprojet/main/codes.csv" # À ADAPTER
-
-command -v python3 >/dev/null 2>&1 || { echo -e "${ROUGE}Python3 est requis mais non installé.${RESET}"; exit 1; }
-command -v curl >/dev/null 2>&1 || { echo -e "${ROUGE}curl est requis mais non installé.${RESET}"; exit 1; }
-command -v bc >/dev/null 2>&1 || { echo -e "${ROUGE}bc est requis mais non installé.${RESET}"; pkg install -y bc; }
+CODES_CSV_URL="https://raw.githubusercontent.com/tonrepo/tonprojet/main/codes.csv" # À MODIFIER éventuel
 
 VERSION_FILE="version.txt"
 VERSION=$(cat "$VERSION_FILE" 2>/dev/null || echo "Inconnue")
 
-# === LOGO ===
 affichage_logo() {
     local logo=(
     "████████╗███████╗"
@@ -102,6 +96,7 @@ afficher_options() {
     printf "%*s" "$espace_gauche" ""; echo -e "${MAGENTA}║${RESET} ${VERT}4.${RESET} 📥 Mise à jour                                   ${MAGENTA}║${RESET}"
     printf "%*s" "$espace_gauche" ""; echo -e "${MAGENTA}║${RESET} ${BLEU}5.${RESET} 🛃 Infos & Aide                                  ${MAGENTA}║${RESET}"
     printf "%*s" "$espace_gauche" ""; echo -e "${MAGENTA}║${RESET} ${BLEU}6.${RESET} ❤ Follow & Pubs auto                             ${MAGENTA}║${RESET}"
+    printf "%*s" "$espace_gauche" ""; echo -e "${MAGENTA}║${RESET} ${JAUNE}7.${RESET} 🔑 Abonnement                                   ${MAGENTA}║${RESET}"
     printf "%*s" "$espace_gauche" ""; echo -e "${MAGENTA}║${RESET} ${ROUGE}0.${RESET} 🔙 Quitter                                       ${MAGENTA}║${RESET}"
 }
 
@@ -223,6 +218,47 @@ maj_auto() {
     read -r
 }
 
+menu_abonnement() {
+    clear
+    echo -e "${JAUNE}╔══════════════════════════════════════════════════════════╗${RESET}"
+    echo -e "${JAUNE}║                        Abonnement                       ║${RESET}"
+    echo -e "${JAUNE}╠══════════════════════════════════════════════════════════╣${RESET}"
+    echo -e "${JAUNE}║ 1. Ajouter une clé d'abonnement                         ║${RESET}"
+    echo -e "${JAUNE}║ 2. Faire abonnement / inscription (via Telegram)         ║${RESET}"
+    echo -e "${JAUNE}║ 0. Retour au menu principal                             ║${RESET}"
+    echo -e "${JAUNE}╚══════════════════════════════════════════════════════════╝${RESET}"
+    echo -n "Votre choix : "
+    read -r subchoix
+    case "$subchoix" in
+        1)
+            clear
+            echo -e "${CYAN}=== Ajouter votre clé d'abonnement (ID utilisateur) ===${RESET}"
+            read -rp "Collez votre clé d'abonnement (ID) achetée : " key
+            if [[ -z "$key" ]]; then
+                echo -e "${ROUGE}Clé vide. Annulation.${RESET}"
+                sleep 1
+                return
+            fi
+            save_user_id "$key"
+            echo -e "${VERT}✅ Clé sauvegardée dans $USER_ID_FILE${RESET}"
+            echo -e "${CYAN}Votre abonnement sera surveillé automatiquement.${RESET}"
+            sleep 2
+            ;;
+        2)
+            clear
+            echo -e "${CYAN}Vous allez être redirigé vers le bot Telegram d'abonnement...${RESET}"
+            termux-open-url "https://t.me/TS_task_bot"
+            sleep 2
+            ;;
+        0)
+            ;;
+        *)
+            echo -e "${ROUGE}Choix invalide.${RESET}"
+            sleep 1
+            ;;
+    esac
+}
+
 menu_principal() {
     clear
     affichage_logo
@@ -231,23 +267,7 @@ menu_principal() {
     afficher_version
 
     user_id=$(get_user_id)
-    if [[ -z "$user_id" ]]; then
-        ask_user_id
-        user_id=$(get_user_id)
-    fi
-
-    if ! is_connected; then
-        echo -e "${ROUGE}⛔️ Accès verrouillé : connexion internet requise.${RESET}"
-        sleep 3
-        menu_principal
-        return
-    fi
-
-    if ! check_code_valid "$user_id"; then
-        locked=1
-    else
-        locked=0
-    fi
+    # Le contrôle d'abonnement se fait ailleurs
 
     afficher_options
     ligne_inferieure
@@ -306,6 +326,10 @@ menu_principal() {
             read -r
             menu_principal
             ;;
+        7)
+            menu_abonnement
+            menu_principal
+            ;;
         0)
             echo -e "${BLEU}Fermeture du programme...${RESET}"
             termux-open-url "https://www.facebook.com/profile.php?id=61556805455642"
@@ -313,13 +337,8 @@ menu_principal() {
             exit 0
             ;;
         *)
-            if [[ "$locked" == "1" && "$choix" != "5" ]]; then
-                echo -e "${ROUGE}🔒 Fonctionnalité réservée aux abonnés. Utilisez le bot Telegram pour vous abonner.${RESET}"
-                sleep 2
-            else
-                echo -e "${ROUGE}Choix invalide. Veuillez réessayer.${RESET}"
-                sleep 1
-            fi
+            echo -e "${ROUGE}Choix invalide. Veuillez réessayer.${RESET}"
+            sleep 1
             menu_principal
             ;;
     esac
