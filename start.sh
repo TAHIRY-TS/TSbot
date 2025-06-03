@@ -1,4 +1,5 @@
 #!/bin/bash
+
 chmod +x ./*.sh ./*.py
 clear
 tput civis
@@ -21,12 +22,12 @@ VERSION=$(cat "$VERSION_FILE" 2>/dev/null || echo "Inconnue")
 
 affichage_logo() {
     local logo=(
-    "████████╗███████╗"
-    "╚══██╔══╝██╔════╝"
-    "   ██║   ███████╗"
-    "   ██║        ██║"
-    "   ██║   ███████║"
-    "   ╚═╝   ╚══════╝"
+        "████████╗███████╗"
+        "╚══██╔══╝██╔════╝"
+        "   ██║   ███████╗"
+        "   ██║        ██║"
+        "   ██║   ███████║"
+        "   ╚═╝   ╚══════╝"
     )
     local colors=(31 33 32 36 34 35)
     local term_width=$(tput cols)
@@ -61,7 +62,7 @@ afficher_version() {
     local largeur=55
     local texte="TS SMM AUTOCLICK - $VERSION"
     local longueur=${#texte}
-    local espace_gauche=$(( ( $(tput cols) - largeur ) / 2))
+    local espace_gauche=$(( ( $(tput cols) - largeur ) / 2 ))
     printf "%*s" "$espace_gauche" ""
     printf "${MAGENTA}║${RESET}"
     printf "%*s" $(( (largeur - 2 + longueur) / 2 )) "$texte"
@@ -260,88 +261,82 @@ menu_abonnement() {
 }
 
 menu_principal() {
-    clear
-    affichage_logo
-    afficher_message_animated
-    afficher_cadre
-    afficher_version
+    while true; do
+        clear
+        affichage_logo
+        afficher_message_animated
+        afficher_cadre
+        afficher_version
 
-    user_id=$(get_user_id)
-    # Le contrôle d'abonnement se fait ailleurs
+        user_id=$(get_user_id)
+        # Le contrôle d'abonnement se fait ailleurs
 
-    afficher_options
-    ligne_inferieure
-    echo ""
-    read -rp "Votre choix : " choix
+        afficher_options
+        ligne_inferieure
+        echo ""
+        read -rp "Votre choix : " choix
 
-    case $choix in
-        1)
-            clear
-            JETON=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 16)
-            echo "$JETON" > .session_ts
-            ./task.bin ig_compte "$JETON"
-            rm -f .session_ts
-            menu_principal
-            ;;
-        2)
-            JETON=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 16)
-            echo "$JETON" > .session_ts
-            ./task.bin task "$JETON"
-            rm -f .session_ts
-            menu_principal
-            ;;
-        3)
-            clear
-            echo -e "${CYAN}Tâche manuelle...${RESET}"
-            if [[ -f main/introxt_Instagram.sh ]]; then
-                bash main/introxt_Instagram.sh
-            else
-                echo -e "${ROUGE}Fichier manquant.${RESET}"
-            fi
-            menu_principal
-            ;;
-        4)
-            clear
-            echo -e "${CYAN}Mise à jour...${RESET}"
-            maj_auto
-            menu_principal
-            ;;
-        5)
-            clear
-            echo -e "${VERT}Développeur : TAHIRY TS"
-            echo -e "\nfacebook : https://www.facebook.com/profile.php?id=61553579523412"
-            echo -e "Email : tahiryandriatefy52@gmail.com"
-            echo -e "Version actuelle : ${VERSION}${RESET}"
-            echo -ne "${JAUNE}Appuyez sur Entrée pour revenir au menu...${RESET}"
-            read -r
-            menu_principal
-            ;;
-        6)
-            clear
-            JETON=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 16)
-            echo "$JETON" > .session_ts
-            ./task.bin automatisation "$JETON"
-            rm -f .session_ts
-            echo -ne "${JAUNE}Appuyez sur Entrée pour revenir au menu...${RESET}"
-            read -r
-            menu_principal
-            ;;
-        7)
-            menu_abonnement
-            menu_principal
-            ;;
-        0)
-            echo -e "${BLEU}Fermeture du programme...${RESET}"
-            termux-open-url "https://www.facebook.com/profile.php?id=61556805455642"
-            cd ~ || exit
-            exit 0
-            ;;
-        *)
-            echo -e "${ROUGE}Choix invalide. Veuillez réessayer.${RESET}"
-            sleep 1
-            menu_principal
-            ;;
-    esac
+        case $choix in
+            1)
+                clear
+                JETON=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 16)
+                echo "$JETON" > .session_ts
+                ./task.bin ig_compte "$JETON"
+                rm -f .session_ts
+                ;;
+            2)
+                JETON=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 16)
+                echo "$JETON" > .session_ts
+                ./task.bin task "$JETON"
+                rm -f .session_ts
+                ;;
+            3)
+                clear
+                echo -e "${CYAN}Tâche manuelle...${RESET}"
+                if [[ -f main/introxt_Instagram.sh ]]; then
+                    bash main/introxt_Instagram.sh
+                else
+                    echo -e "${ROUGE}Fichier manquant.${RESET}"
+                fi
+                ;;
+            4)
+                clear
+                echo -e "${CYAN}Mise à jour...${RESET}"
+                maj_auto
+                ;;
+            5)
+                clear
+                echo -e "${VERT}Développeur : TAHIRY TS"
+                echo -e "\nfacebook : https://www.facebook.com/profile.php?id=61553579523412"
+                echo -e "Email : tahiryandriatefy52@gmail.com"
+                echo -e "Version actuelle : ${VERSION}${RESET}"
+                echo -ne "${JAUNE}Appuyez sur Entrée pour revenir au menu...${RESET}"
+                read -r
+                ;;
+            6)
+                clear
+                JETON=$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 16)
+                echo "$JETON" > .session_ts
+                ./task.bin automatisation "$JETON"
+                rm -f .session_ts
+                echo -ne "${JAUNE}Appuyez sur Entrée pour revenir au menu...${RESET}"
+                read -r
+                ;;
+            7)
+                menu_abonnement
+                ;;
+            0)
+                echo -e "${BLEU}Fermeture du programme...${RESET}"
+                termux-open-url "https://www.facebook.com/profile.php?id=61556805455642"
+                cd ~ || exit
+                exit 0
+                ;;
+            *)
+                echo -e "${ROUGE}Choix invalide. Veuillez réessayer.${RESET}"
+                sleep 1
+                ;;
+        esac
+    done
 }
 
 menu_principal
