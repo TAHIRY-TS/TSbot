@@ -169,7 +169,7 @@ afficher_options() {
     printf "%*s" "$espace_gauche" ""; echo -e "${MAGENTA}║${RESET} ${VERT}4.${RESET} 📥 Mise à jour                                   ${MAGENTA}║${RESET}"
     printf "%*s" "$espace_gauche" ""; echo -e "${MAGENTA}║${RESET} ${BLEU}5.${RESET} 🛃 Infos & Aide                                  ${MAGENTA}║${RESET}"
     printf "%*s" "$espace_gauche" ""; echo -e "${MAGENTA}║${RESET} ${BLEU}6.${RESET} ❤ Follow & Pubs auto                             ${MAGENTA}║${RESET}"
-    printf "%*s" "$espace_gauche" ""; echo -e "${MAGENTA}║${RESET} ${JAUNE}7.${RESET} 🔑 Abonnement                                   ${MAGENTA}║${RESET}"
+    printf "%*s" "$espace_gauche" ""; echo -e "${MAGENTA}║${RESET} ${JAUNE}7.${RESET} 🔑 Abonnement                                    ${MAGENTA}║${RESET}"
     printf "%*s" "$espace_gauche" ""; echo -e "${MAGENTA}║${RESET} ${ROUGE}0.${RESET} 🔙 Quitter                                       ${MAGENTA}║${RESET}"
 }
 
